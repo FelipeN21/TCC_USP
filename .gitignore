@@ -1,0 +1,6 @@
+node_modules/
+results/
+docs/
+*.log
+.env
+load-tests/k6/_summary_tmp.json

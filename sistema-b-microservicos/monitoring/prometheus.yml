@@ -1,0 +1,28 @@
+global:
+  scrape_interval: 2s
+  evaluation_interval: 2s
+
+scrape_configs:
+  - job_name: 'gateway'
+    static_configs:
+      - targets: ['gateway:3000']
+
+  - job_name: 'servico-autenticacao'
+    static_configs:
+      - targets: ['auth-service:3000']
+
+  - job_name: 'servico-pedidos'
+    static_configs:
+      - targets: ['pedidos-service:3000']
+
+  - job_name: 'servico-faturamento'
+    static_configs:
+      - targets: ['faturamento-service:3000']
+
+  - job_name: 'servico-notificacoes'
+    static_configs:
+      - targets: ['notificacoes-service:3000']
+
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']

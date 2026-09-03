@@ -1,0 +1,32 @@
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import { pool } from '../../db/pool.js';
+
+const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-troque-em-producao';
+
+export async function registrar(email, password) {
+  const hash = await bcrypt.hash(password, 10);
+  const { rows } = await pool.query(
+    'INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email, created_at',
+    [email, hash]
+  );
+  return rows[0];
+}
+
+export async function autenticar(email, password) {
+  const { rows } = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+  const user = rows[0];
+  if (!user) return null;
+  const ok = await bcrypt.compare(password, user.password_hash);
+  if (!ok) return null;
+  const token = jwt.sign({ sub: user.id, email: user.email }, JWT_SECRET, { expiresIn: '1h' });
+  return token;
+}
+
+export function verificarToken(token) {
+  try {
+    return jwt.verify(token, JWT_SECRET);
+  } catch {
+    return null;
+  }
+}

@@ -1,0 +1,177 @@
+name: sistema-b
+
+x-app-healthcheck: &app-healthcheck
+  test: ["CMD", "node", "-e", "fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+  interval: 5s
+  timeout: 3s
+  retries: 15
+
+x-pg-healthcheck: &pg-healthcheck
+  test: ["CMD-SHELL", "pg_isready -U postgres"]
+  interval: 5s
+  timeout: 3s
+  retries: 10
+
+services:
+  # ---------- API Gateway ----------
+  gateway:
+    build: ./gateway
+    ports:
+      - "3020:3000"
+    environment:
+      PORT: 3000
+      JWT_SECRET: dev-secret-troque-em-producao
+      AUTH_SERVICE_URL: http://auth-service:3000
+      PEDIDOS_SERVICE_URL: http://pedidos-service:3000
+      FATURAMENTO_SERVICE_URL: http://faturamento-service:3000
+      NOTIFICACOES_SERVICE_URL: http://notificacoes-service:3000
+    depends_on:
+      auth-service: { condition: service_healthy }
+      pedidos-service: { condition: service_healthy }
+      faturamento-service: { condition: service_healthy }
+      notificacoes-service: { condition: service_healthy }
+    healthcheck: *app-healthcheck
+
+  # ---------- servico-autenticacao ----------
+  auth-service:
+    build: ./servico-autenticacao
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgres://postgres:postgres@db-auth:5432/auth
+      JWT_SECRET: dev-secret-troque-em-producao
+    depends_on:
+      db-auth: { condition: service_healthy }
+    healthcheck: *app-healthcheck
+
+  db-auth:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: auth
+    ports: ["5434:5432"]
+    volumes:
+      - ./servico-autenticacao/src/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - db-auth-data:/var/lib/postgresql/data
+    healthcheck: *pg-healthcheck
+
+  # ---------- servico-pedidos ----------
+  pedidos-service:
+    build: ./servico-pedidos
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgres://postgres:postgres@db-pedidos:5432/pedidos
+      FATURAMENTO_SERVICE_URL: http://faturamento-service:3000
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+    depends_on:
+      db-pedidos: { condition: service_healthy }
+      faturamento-service: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    healthcheck: *app-healthcheck
+
+  db-pedidos:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: pedidos
+    ports: ["5435:5432"]
+    volumes:
+      - ./servico-pedidos/src/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - db-pedidos-data:/var/lib/postgresql/data
+    healthcheck: *pg-healthcheck
+
+  # ---------- servico-faturamento ----------
+  faturamento-service:
+    build: ./servico-faturamento
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgres://postgres:postgres@db-faturamento:5432/faturamento
+    depends_on:
+      db-faturamento: { condition: service_healthy }
+    healthcheck: *app-healthcheck
+
+  db-faturamento:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: faturamento
+    ports: ["5436:5432"]
+    volumes:
+      - ./servico-faturamento/src/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - db-faturamento-data:/var/lib/postgresql/data
+    healthcheck: *pg-healthcheck
+
+  # ---------- servico-notificacoes ----------
+  notificacoes-service:
+    build: ./servico-notificacoes
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgres://postgres:postgres@db-notificacoes:5432/notificacoes
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+    depends_on:
+      db-notificacoes: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    healthcheck: *app-healthcheck
+
+  db-notificacoes:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: notificacoes
+    ports: ["5437:5432"]
+    volumes:
+      - ./servico-notificacoes/src/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - db-notificacoes-data:/var/lib/postgresql/data
+    healthcheck: *pg-healthcheck
+
+  # ---------- Mensageria ----------
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672" # painel de administração (guest/guest)
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
+  # ---------- Observabilidade ----------
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9092:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3021:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+    depends_on:
+      - prometheus
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    ports:
+      - "8082:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    privileged: true
+
+volumes:
+  db-auth-data:
+  db-pedidos-data:
+  db-faturamento-data:
+  db-notificacoes-data:
