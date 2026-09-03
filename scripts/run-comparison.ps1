@@ -98,7 +98,7 @@ foreach ($sis in $Sistemas) {
           }
           Start-Sleep -Seconds 2
         }
-      } -ArgumentList (, $cfg.StatsContainers), $statsFile
+      } -ArgumentList $cfg.StatsContainers, $statsFile
 
       $tmpSummary = Join-Path $K6ScriptDir '_summary_tmp.json'
       if (Test-Path $tmpSummary) { Remove-Item $tmpSummary -Force }
